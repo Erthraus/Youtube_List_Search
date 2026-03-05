@@ -1,2 +1,11 @@
-settings.json
+# Environments
 .venv/
+venv/
+env/
+
+# Settings and Secrets
+settings.json
+
+# Python Cache
+__pycache__/
+*.pyc
