@@ -5,6 +5,8 @@ env/
 
 # Settings and Secrets
 settings.json
+client_secret.json
+token.json
 
 # Python Cache
 __pycache__/
