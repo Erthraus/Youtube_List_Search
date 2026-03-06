@@ -1,283 +1,28 @@
 """
-YouTube Playlist Manager & AI Categorizer
-Open Source Project for fetching, managing and categorizing YouTube playlist videos using Gemini AI.
+YouTube Playlist AI Manager & Editor
+Open Source SaaS Project for fetching, managing, and categorizing YouTube playlist videos using Gemini AI.
+Fully compatible with Streamlit Cloud Deployment, using Browser Cookies and Session States.
 """
 
 import streamlit as st
 import pandas as pd
 from googleapiclient.discovery import build
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 from google import genai
+import extra_streamlit_components as stx
 import time
 import json
 import os
 
-# ==========================================
-# 1. CONSTANTS & TRANSLATIONS
-# ==========================================
-SETTINGS_FILE = "settings.json"
-CLIENT_SECRETS_FILE = "client_secret.json"
-TOKEN_FILE = "token.json"
-SCOPES = ['https://www.googleapis.com/auth/youtube']
-
-TRANSLATIONS = {
-    "tr": {
-        "page_title": "YouTube Liste Yöneticisi",
-        "header": "📺 YouTube Playlist Dashboard",
-        "settings_header": "⚙️ Ayarlar & Giriş",
-        "auth_mode": "Giriş Yöntemi",
-        "mode_api": "🔑 API Key (Sadece Okuma)",
-        "mode_oauth": "👤 Google Hesabı (Tam Yetki)",
-        "yt_api_key": "1. YouTube API Key",
-        "playlist_id": "2. Oynatma Listesi ID",
-        "gemini_api_key": "3. Gemini API Key",
-        "btn_save": "💾 Kaydet",
-        "btn_fetch": "📥 Verileri Çek",
-        "btn_login": "Google ile Giriş Yap",
-        "msg_need_secret": "Tam yetki için proje klasöründe 'client_secret.json' dosyası bulunmalıdır.",
-        "msg_login_success": "Google hesabınıza başarıyla giriş yapıldı!",
-        "msg_saved": "Ayarlar başarıyla kaydedildi!",
-        "msg_fetching": "Videolar YouTube'dan çekiliyor... Lütfen bekleyin.",
-        "msg_mapping": "Kategoriler eşleştiriliyor...",
-        "msg_fetch_success": "Harika! Toplam {count} video listeye eklendi.",
-        "msg_fetch_error": "Hata: YouTube verisi çekilemedi. Bağlantıyı ve ID'leri kontrol edin.",
-        "msg_missing_keys": "Devam etmek için gerekli ID ve Key bilgilerini doldurun.",
-        "tab_search": "🔍 Arama ve Düzenleme",
-        "tab_ai": "🤖 Yapay Zeka Asistanı",
-        "search_title": "🎬 Video Adında Ara",
-        "search_channel": "👤 Kanal Adında Ara",
-        "filter_category": "📂 Kategori Filtresi",
-        "all": "Tümü",
-        "metric_total": "Toplam Video",
-        "metric_channels": "Farklı Kanal",
-        "ai_info": "Bu araç, API limitlerine takılmamanız için 1000 videoyu 250'şerli dev paketler halinde yapay zekaya gönderir.",
-        "btn_ai_scan": "Yapay Zeka Analizini Başlat",
-        "msg_missing_gemini": "Gemini API Key eksik. Lütfen sol menüden ekleyin.",
-        "msg_ai_processing": "Yapay Zeka analiz ediyor (Paket başı ~5 sn)...",
-        "msg_chunk_progress": "Durum: {total} paketten {current}. si tamamlandı.",
-        "msg_ai_success": "✨ Yapay Zeka sınıflandırması başarıyla tamamlandı!",
-        "msg_ai_error": "Okuma hatası: {error}",
-        "col_select": "Seç",
-        "col_thumb": "Kapak",
-        "col_custom_cat": "AI Kategorisi",
-        "col_title": "Video Adı",
-        "col_channel": "Kanal",
-        "col_yt_cat": "YouTube Kategorisi",
-        "col_link": "İzle",
-        "btn_delete_selected": "🗑️ Seçili Videoları Listeden Çıkar",
-        "msg_delete_success": "Seçilen {count} video YouTube listenizden silindi! Tabloyu yenilemek için verileri tekrar çekin.",
-        "cat_personal": "Kişisel Gelişim",
-        "cat_vocal": "Vokal Eğitimi",
-        "cat_software": "Yazılımcı",
-        "cat_politics": "Siyaset",
-        "cat_general": "Genel / İlgisiz",
-        "welcome_title": "Hoş Geldiniz! 👋",
-        "welcome_text": "Lütfen sol menüden Giriş Yönteminizi seçerek başlayın."
-    },
-    "en": {
-        "page_title": "YouTube Playlist Manager",
-        "header": "📺 YouTube Playlist Dashboard",
-        "settings_header": "⚙️ Settings & Login",
-        "auth_mode": "Authentication Mode",
-        "mode_api": "🔑 API Key (Read Only)",
-        "mode_oauth": "👤 Google Account (Full Access)",
-        "yt_api_key": "1. YouTube API Key",
-        "playlist_id": "2. Playlist ID",
-        "gemini_api_key": "3. Gemini API Key",
-        "btn_save": "💾 Save Settings",
-        "btn_fetch": "📥 Fetch Data",
-        "btn_login": "Login with Google",
-        "msg_need_secret": "'client_secret.json' file is required in the root folder for Full Access.",
-        "msg_login_success": "Successfully logged in to your Google account!",
-        "msg_saved": "Settings saved successfully!",
-        "msg_fetching": "Fetching videos from YouTube... Please wait.",
-        "msg_mapping": "Mapping categories...",
-        "msg_fetch_success": "Awesome! {count} videos fetched successfully.",
-        "msg_fetch_error": "Error: Could not fetch data. Check your credentials.",
-        "msg_missing_keys": "Please fill in the required ID and Key fields to continue.",
-        "tab_search": "🔍 Search & Edit",
-        "tab_ai": "🤖 AI Assistant",
-        "search_title": "🎬 Search Title",
-        "search_channel": "👤 Search Channel",
-        "filter_category": "📂 Category Filter",
-        "all": "All",
-        "metric_total": "Total Videos",
-        "metric_channels": "Unique Channels",
-        "ai_info": "This tool sends videos in large batches of 250 to avoid API rate limits.",
-        "btn_ai_scan": "Start AI Analysis",
-        "msg_missing_gemini": "Gemini API Key is missing in the sidebar.",
-        "msg_ai_processing": "AI is analyzing (approx. 5s per batch)...",
-        "msg_chunk_progress": "Status: Batch {current} of {total} completed.",
-        "msg_ai_success": "✨ AI classification completed successfully!",
-        "msg_ai_error": "Read error: {error}",
-        "col_select": "Select",
-        "col_thumb": "Thumb",
-        "col_custom_cat": "AI Category",
-        "col_title": "Video Title",
-        "col_channel": "Channel",
-        "col_yt_cat": "YouTube Category",
-        "col_link": "Watch",
-        "btn_delete_selected": "🗑️ Remove Selected Videos",
-        "msg_delete_success": "Successfully removed {count} videos! Fetch data again to update the table.",
-        "cat_personal": "Personal Development",
-        "cat_vocal": "Vocal Training",
-        "cat_software": "Software Developer",
-        "cat_politics": "Politics",
-        "cat_general": "General / Unrelated",
-        "welcome_title": "Welcome! 👋",
-        "welcome_text": "Please select your Authentication Mode from the sidebar to begin."
-    }
-}
+# Allow OAuth testing over HTTP for local development
+os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
 
 # ==========================================
-# 2. HELPER FUNCTIONS
+# 1. PAGE CONFIG & CUSTOM CSS
 # ==========================================
-def t(key, **kwargs):
-    lang = st.session_state.get('lang', 'tr')
-    text = TRANSLATIONS[lang].get(key, key)
-    return text.format(**kwargs) if kwargs else text
-
-def load_settings():
-    if os.path.exists(SETTINGS_FILE):
-        with open(SETTINGS_FILE, "r", encoding="utf-8") as file:
-            return json.load(file)
-    return {"youtube_api_key": "", "playlist_id": "", "gemini_api_key": ""}
-
-def save_settings(yt_key, pl_id, gem_key):
-    with open(SETTINGS_FILE, "w", encoding="utf-8") as file:
-        json.dump({"youtube_api_key": yt_key, "playlist_id": pl_id, "gemini_api_key": gem_key}, file)
-
-# ==========================================
-# 3. YOUTUBE API & OAUTH FUNCTIONS
-# ==========================================
-def get_youtube_service_api(api_key):
-    """Initializes read-only YouTube client using API Key."""
-    return build('youtube', 'v3', developerKey=api_key)
-
-def get_youtube_service_oauth():
-    """Initializes full-access YouTube client using OAuth 2.0."""
-    creds = None
-    if os.path.exists(TOKEN_FILE):
-        creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists(CLIENT_SECRETS_FILE):
-                st.sidebar.error(t("msg_need_secret"))
-                return None
-            flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open(TOKEN_FILE, 'w') as token:
-            token.write(creds.to_json())
-    return build('youtube', 'v3', credentials=creds)
-
-def get_category_mapping(youtube_client):
-    request = youtube_client.videoCategories().list(part="snippet", regionCode="US")
-    response = request.execute()
-    return {item['id']: item['snippet']['title'] for item in response.get('items', [])}
-
-def fetch_playlist_videos(youtube_client, playlist_id):
-    videos = []
-    next_page_token = None
-    
-    with st.spinner(t("msg_fetching")):
-        while True:
-            request = youtube_client.playlistItems().list(
-                part="snippet",
-                playlistId=playlist_id,
-                maxResults=50,
-                pageToken=next_page_token
-            )
-            response = request.execute()
-            
-            for item in response['items']:
-                # playlist_item_id is CRUCIAL for deleting videos!
-                playlist_item_id = item['id'] 
-                video_id = item['snippet']['resourceId']['videoId']
-                title = item['snippet']['title']
-                channel = item['snippet'].get('videoOwnerChannelTitle', 'Unknown')
-                thumb_url = item['snippet'].get('thumbnails', {}).get('default', {}).get('url', '')
-                
-                videos.append({
-                    'playlist_item_id': playlist_item_id, # Hidden ID used for deletion
-                    'video_id': video_id,
-                    'thumbnail': thumb_url,  
-                    'title': title,
-                    'channel': channel
-                })
-                
-            next_page_token = response.get('nextPageToken')
-            if not next_page_token:
-                break
-    return videos
-
-def assign_youtube_categories(youtube_client, videos, category_mapping):
-    video_ids = [vid['video_id'] for vid in videos]
-    with st.spinner(t("msg_mapping")):
-        for i in range(0, len(video_ids), 50):
-            chunk_ids = video_ids[i:i+50]
-            request = youtube_client.videos().list(part="snippet", id=",".join(chunk_ids))
-            response = request.execute()
-            for j, item in enumerate(response['items']):
-                cat_id = item['snippet']['categoryId']
-                videos[i+j]['yt_category'] = category_mapping.get(cat_id, "Other")
-    return videos
-
-def delete_video_from_playlist(youtube_client, playlist_item_id):
-    """Deletes a specific video from the playlist using its unique playlist_item_id."""
-    youtube_client.playlistItems().delete(id=playlist_item_id).execute()
-
-# ==========================================
-# 4. GEMINI AI BATCH PROCESSING
-# ==========================================
-def batch_gemini_categorize(df, gemini_api_key):
-    client = genai.Client(api_key=gemini_api_key)
-    category_map = {}
-    chunk_size = 250 
-    total_chunks = (len(df) // chunk_size) + (1 if len(df) % chunk_size != 0 else 0)
-    
-    progress_bar = st.progress(0, text=t("msg_ai_processing"))
-    for i in range(total_chunks):
-        chunk = df.iloc[i*chunk_size : (i+1)*chunk_size]
-        if chunk.empty: continue
-            
-        video_list_str = "".join([f"ID: {row['video_id']} | Title: {row['title']} | Channel: {row['channel']}\n" for _, row in chunk.iterrows()])
-            
-        prompt = f"""
-        Below is a list of YouTube videos. Identify ONLY the videos that fit into these 4 target categories:
-        1. Personal Development
-        2. Vocal Training
-        3. Software Developer
-        4. Politics
-        
-        If a video does not fit, completely IGNORE it.
-        Respond ONLY in valid JSON format: [{{"id": "video_id", "category": "Software Developer"}}]
-        
-        Video List:
-        {video_list_str}
-        """
-        try:
-            response = client.models.generate_content(model='gemini-flash-lite-latest', contents=prompt)
-            raw_text = response.text.strip()
-            if raw_text.startswith("```json"): raw_text = raw_text[7:-3]
-            elif raw_text.startswith("```"): raw_text = raw_text[3:-3]
-            for item in json.loads(raw_text.strip()):
-                category_map[item['id']] = item['category']
-        except Exception as e:
-            st.error(t("msg_ai_error", error=str(e)))
-            
-        progress_bar.progress((i + 1) / total_chunks, text=t("msg_chunk_progress", current=i+1, total=total_chunks))
-        time.sleep(4) 
-    return category_map
-
-
-# ==========================================
-# 5. UI: PAGE CONFIG & STYLES
-# ==========================================
-st.set_page_config(page_title="YT Manager", layout="wide", page_icon="📺")
+st.set_page_config(page_title="YT Playlist Manager", layout="wide", page_icon="📺")
 
 st.markdown("""
 <style>
@@ -288,56 +33,272 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-col_spacer, col_lang = st.columns([10, 1])
-with col_lang:
-    selected_lang = st.selectbox("🌐", ["tr", "en"], index=0 if st.session_state.get('lang', 'tr') == 'tr' else 1, label_visibility="collapsed")
-    st.session_state['lang'] = selected_lang
+# ==========================================
+# 2. CONSTANTS & AI CATEGORIES
+# ==========================================
+CLIENT_SECRETS_FILE = "client_secret.json"
+SCOPES = ['https://www.googleapis.com/auth/youtube']
 
-st.title(t("header"))
+TARGET_CATEGORIES = [
+    "Personal Development",
+    "Vocal Training",
+    "Software Developer",
+    "Politics",
+    "FNAF Theory",
+    "Gameplay"
+]
+DEFAULT_CATEGORY = "General / Unrelated"
 
 # ==========================================
-# 6. UI: SIDEBAR (AUTH & SETTINGS)
+# 3. COOKIE MANAGER INITIALIZATION
 # ==========================================
-user_settings = load_settings()
+cookie_manager = stx.CookieManager()
+time.sleep(0.1)
+
+# ==========================================
+# 4. YOUTUBE API & OAUTH FUNCTIONS
+# ==========================================
+def get_youtube_service_api(api_key):
+    try:
+        return build('youtube', 'v3', developerKey=api_key)
+    except Exception as e:
+        st.error(f"Invalid YouTube API Key: {e}")
+        return None
+
+def get_youtube_service_oauth(creds_dict):
+    try:
+        creds = Credentials.from_authorized_user_info(creds_dict, SCOPES)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            oauth_json = json.loads(creds.to_json())
+            st.session_state["oauth_token"] = oauth_json
+            cookie_manager.set('oauth_token', oauth_json, key="update_oauth_cookie")
+        return build('youtube', 'v3', credentials=creds)
+    except Exception as e:
+        st.error(f"OAuth Authentication Error: {e}")
+        return None
+
+def get_category_mapping(youtube_client):
+    request = youtube_client.videoCategories().list(part="snippet", regionCode="US")
+    response = request.execute()
+    return {item['id']: item['snippet']['title'] for item in response.get('items', [])}
+
+def assign_youtube_categories(youtube_client, videos, category_mapping):
+    video_ids = [vid['video_id'] for vid in videos]
+    for i in range(0, len(video_ids), 50):
+        chunk_ids = video_ids[i:i+50]
+        request = youtube_client.videos().list(part="snippet", id=",".join(chunk_ids))
+        response = request.execute()
+        for j, item in enumerate(response.get('items', [])):
+            cat_id = item['snippet']['categoryId']
+            videos[i+j]['yt_category'] = category_mapping.get(cat_id, "Other")
+    return videos
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_playlist_videos_cached(playlist_id, auth_identifier):
+    youtube_client = get_youtube_service_api(auth_identifier) if isinstance(auth_identifier, str) else get_youtube_service_oauth(auth_identifier)
+    
+    cat_map = get_category_mapping(youtube_client)
+    videos = []
+    next_page_token = None
+    
+    while True:
+        request = youtube_client.playlistItems().list(
+            part="snippet",
+            playlistId=playlist_id,
+            maxResults=50,
+            pageToken=next_page_token
+        )
+        response = request.execute()
+        
+        for item in response.get('items', []):
+            playlist_item_id = item['id'] 
+            video_id = item['snippet']['resourceId']['videoId']
+            title = item['snippet']['title']
+            channel = item['snippet'].get('videoOwnerChannelTitle', 'Unknown')
+            thumb_url = item['snippet'].get('thumbnails', {}).get('default', {}).get('url', '')
+            
+            videos.append({
+                'playlist_item_id': playlist_item_id,
+                'video_id': video_id,
+                'thumbnail': thumb_url,  
+                'title': title,
+                'channel': channel,
+                'yt_category': "Unknown", 
+                'custom_category': DEFAULT_CATEGORY
+            })
+            
+        next_page_token = response.get('nextPageToken')
+        if not next_page_token:
+            break
+            
+    videos = assign_youtube_categories(youtube_client, videos, cat_map)
+    return videos
+
+def delete_video_from_playlist(youtube_client, playlist_item_id):
+    youtube_client.playlistItems().delete(id=playlist_item_id).execute()
+    fetch_playlist_videos_cached.clear()
+
+# ==========================================
+# 5. GEMINI AI BATCH PROCESSING
+# ==========================================
+def batch_gemini_categorize(df_to_process, gemini_api_key):
+    client = genai.Client(api_key=gemini_api_key)
+    category_map = {}
+    chunk_size = 250 
+    total_chunks = (len(df_to_process) // chunk_size) + (1 if len(df_to_process) % chunk_size != 0 else 0)
+    
+    progress_bar = st.progress(0, text="AI is analyzing remaining videos... Please wait.")
+    
+    for i in range(total_chunks):
+        chunk = df_to_process.iloc[i*chunk_size : (i+1)*chunk_size]
+        if chunk.empty: continue
+            
+        video_list_str = "".join([f"ID: {row['video_id']} | Title: {row['title']} | Channel: {row['channel']}\n" for _, row in chunk.iterrows()])
+        
+        categories_str = "\n".join([f"{idx+1}. {cat}" for idx, cat in enumerate(TARGET_CATEGORIES)])
+        
+        prompt = f"""
+        Below is a list of YouTube videos. Identify ONLY the videos that fit into these {len(TARGET_CATEGORIES)} target categories:
+        {categories_str}
+        
+        If a video does not fit, completely IGNORE it.
+        Respond ONLY in valid JSON format exactly like this example: 
+        [{{"id": "video_id", "category": "FNAF Theory"}}]
+        
+        Video List:
+        {video_list_str}
+        """
+        try:
+            response = client.models.generate_content(model='gemini-flash-lite-latest', contents=prompt)
+            raw_text = response.text.strip()
+            if raw_text.startswith("```json"): raw_text = raw_text[7:-3]
+            elif raw_text.startswith("```"): raw_text = raw_text[3:-3]
+            for item in json.loads(raw_text.strip()):
+                if item['category'] in TARGET_CATEGORIES:
+                    category_map[item['id']] = item['category']
+        except Exception as e:
+            st.error(f"Read error in batch {i+1}: {str(e)}")
+            
+        progress_bar.progress((i + 1) / total_chunks, text=f"Status: Batch {i+1} of {total_chunks} completed.")
+        time.sleep(4) 
+    return category_map
+
+
+# ==========================================
+# 6. UI: MAIN APP & SIDEBAR
+# ==========================================
+st.title("📺 YouTube Playlist Dashboard")
 
 with st.sidebar:
-    st.header(t("settings_header"))
+    st.header("⚙️ Settings & Login")
     
-    auth_mode = st.radio(t("auth_mode"), [t("mode_api"), t("mode_oauth")])
+    saved_yt_key = cookie_manager.get(cookie="yt_api_key") or ""
+    saved_pl_id = cookie_manager.get(cookie="playlist_id") or ""
+    saved_gem_key = cookie_manager.get(cookie="gem_api_key") or ""
+    saved_oauth = st.session_state.get("oauth_token") or cookie_manager.get(cookie="oauth_token")
+    
+    auth_mode = st.radio("Authentication Mode", ["🔑 API Key (Read Only)", "👤 Google Account (Full Access)"])
     st.write("---")
     
-    input_yt_api = ""
-    is_authenticated = False
     yt_client = None
+    is_authenticated = False
+    auth_identifier = None
 
-    if auth_mode == t("mode_api"):
-        input_yt_api = st.text_input(t("yt_api_key"), type="password", value=user_settings.get("youtube_api_key", ""))
+    if auth_mode == "🔑 API Key (Read Only)":
+        input_yt_api = st.text_input("1. YouTube API Key", type="password", value=saved_yt_key)
         if input_yt_api:
             yt_client = get_youtube_service_api(input_yt_api)
             is_authenticated = True
+            auth_identifier = input_yt_api
     else:
-        if st.button(t("btn_login"), type="primary", use_container_width=True):
-            yt_client = get_youtube_service_oauth()
-            if yt_client:
-                st.session_state['oauth_client'] = True
-                st.success(t("msg_login_success"))
+        st.info("Ensure 'client_secret.json' is in your repo securely to use Google Login.")
         
-        # Keep client alive across re-runs if already logged in
-        if st.session_state.get('oauth_client', False):
-            yt_client = get_youtube_service_oauth()
-            is_authenticated = True
+        if saved_oauth:
+            yt_client = get_youtube_service_oauth(saved_oauth)
+            if yt_client:
+                is_authenticated = True
+                auth_identifier = saved_oauth
+                st.success("✅ Logged in to Google Account.")
+                if st.button("Logout", key="btn_logout"):
+                    if "oauth_token" in st.session_state:
+                        del st.session_state["oauth_token"]
+                    cookie_manager.delete("oauth_token")
+                    st.rerun()
+        else:
+            try:
+                redirect_uri = st.text_input("OAuth Redirect URI (Required for Cloud)", value="http://localhost:8501/")
+                
+                # Read from .oauth_state.json to persist state across Streamlit reruns
+                state_file = ".oauth_state.json"
+                try:
+                    with open(state_file, "r") as f:
+                        oauth_states = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    oauth_states = {}
 
-    input_pl_id = st.text_input(t("playlist_id"), value=user_settings.get("playlist_id", ""))
-    input_gemini_api = st.text_input(t("gemini_api_key"), type="password", value=user_settings.get("gemini_api_key", ""))
+                if "auth_url" not in st.session_state or st.session_state.get("redirect_uri") != redirect_uri:
+                    flow = Flow.from_client_secrets_file(
+                        CLIENT_SECRETS_FILE,
+                        scopes=SCOPES,
+                        redirect_uri=redirect_uri
+                    )
+                    auth_url, state = flow.authorization_url(prompt='consent')
+                    
+                    # Save the code_verifier mapped by state to file
+                    oauth_states[state] = getattr(flow, "code_verifier", None)
+                    with open(state_file, "w") as f:
+                        json.dump(oauth_states, f)
+                        
+                    st.session_state["auth_url"] = auth_url
+                    st.session_state["redirect_uri"] = redirect_uri
+                
+                st.markdown(f'<a href="{st.session_state["auth_url"]}" target="_self"><button style="width:100%; background-color:#4285F4; color:white; border:none; padding:10px; border-radius:5px; cursor:pointer;">1. Login with Google</button></a>', unsafe_allow_html=True)
+                
+                query_params = st.query_params
+                if "code" in query_params and "state" in query_params:
+                    auth_code = query_params["code"]
+                    auth_state = query_params["state"]
+                    if auth_code != st.session_state.get("processed_auth_code"):
+                        flow = Flow.from_client_secrets_file(
+                            CLIENT_SECRETS_FILE,
+                            scopes=SCOPES,
+                            redirect_uri=redirect_uri
+                        )
+                        # Restore code verifier from state logic cache
+                        if auth_state in oauth_states:
+                            flow.code_verifier = oauth_states[auth_state]
+                        
+                        # Use auth_response URL to prevent state validation issues
+                        auth_response = st.query_params.to_dict()
+                        full_url = f"{redirect_uri}?{'&'.join([f'{k}={v}' for k,v in auth_response.items()])}"
+                        flow.fetch_token(authorization_response=full_url)
+                        creds = flow.credentials
+                        oauth_json = json.loads(creds.to_json())
+                        st.session_state["oauth_token"] = oauth_json
+                        cookie_manager.set("oauth_token", oauth_json, key="set_oauth")
+                        st.session_state["processed_auth_code"] = auth_code
+                        st.query_params.clear() 
+                        st.success("Login successful! Reloading...")
+                        time.sleep(1)
+                        st.rerun()
+            except Exception as e:
+                st.error(f"OAuth configuration missing or invalid. {e}")
+
+    input_pl_id = st.text_input("2. Playlist ID", value=saved_pl_id)
+    input_gemini_api = st.text_input("3. Gemini API Key", type="password", value=saved_gem_key)
 
     st.write("") 
     col_btn_save, col_btn_fetch = st.columns(2)
     with col_btn_save:
-        if st.button(t("btn_save"), use_container_width=True):
-            save_settings(input_yt_api, input_pl_id, input_gemini_api)
-            st.toast(t("msg_saved"), icon="✅")
+        if st.button("💾 Save Settings", use_container_width=True):
+            cookie_manager.set("yt_api_key", input_yt_api if auth_mode == "🔑 API Key (Read Only)" else "", key="s_yt")
+            cookie_manager.set("playlist_id", input_pl_id, key="s_pl")
+            cookie_manager.set("gem_api_key", input_gemini_api, key="s_gem")
+            st.toast("Settings saved to cookies securely!", icon="✅")
+            
     with col_btn_fetch:
-        btn_fetch_data = st.button(t("btn_fetch"), use_container_width=True)
+        btn_fetch_data = st.button("📥 Fetch Data", type="primary", use_container_width=True)
 
 # ==========================================
 # 7. UI: DATA FETCHING LOGIC
@@ -345,106 +306,114 @@ with st.sidebar:
 if btn_fetch_data:
     if is_authenticated and input_pl_id:
         try:
-            cat_map = get_category_mapping(yt_client)
-            raw_videos = fetch_playlist_videos(yt_client, input_pl_id)
-            final_videos = assign_youtube_categories(yt_client, raw_videos, cat_map)
-            
-            st.session_state['df'] = pd.DataFrame(final_videos)
-            st.toast(t("msg_fetch_success", count=len(final_videos)), icon="🎉")
+            with st.spinner("Fetching videos..."):
+                raw_videos = fetch_playlist_videos_cached(input_pl_id, auth_identifier)
+                
+                if 'df' in st.session_state and not st.session_state['df'].empty:
+                    existing_tags = st.session_state['df'].set_index('video_id')['custom_category'].to_dict()
+                    for vid in raw_videos:
+                        if vid['video_id'] in existing_tags:
+                            vid['custom_category'] = existing_tags[vid['video_id']]
+                
+                st.session_state['df'] = pd.DataFrame(raw_videos)
+            st.toast(f"Successfully loaded {len(raw_videos)} videos!", icon="🎉")
         except Exception as e:
-            st.error(t("msg_fetch_error"))
+            st.error(f"Error fetching data: {e}")
     else:
-        st.warning(t("msg_missing_keys"))
+        st.warning("Please provide necessary authentication and Playlist ID.")
 
 # ==========================================
 # 8. UI: MAIN DASHBOARD
 # ==========================================
-if 'df' in st.session_state:
+if 'df' in st.session_state and not st.session_state['df'].empty:
     data_frame = st.session_state['df']
     
     metric_col1, metric_col2, metric_col3 = st.columns(3)
     with metric_col1:
-        with st.container(border=True): st.metric(label=t("metric_total"), value=len(data_frame))
+        with st.container(border=True): st.metric(label="Total Videos", value=len(data_frame))
     with metric_col2:
-        with st.container(border=True): st.metric(label=t("metric_channels"), value=data_frame['channel'].nunique())
+        with st.container(border=True): st.metric(label="Unique Channels", value=data_frame['channel'].nunique())
+    with metric_col3:
+        tagged_count = len(data_frame[data_frame['custom_category'] != DEFAULT_CATEGORY])
+        with st.container(border=True): st.metric(label="AI Tagged Videos", value=f"{tagged_count} / {len(data_frame)}")
             
     st.write("---")
-    tab_search, tab_ai = st.tabs([t("tab_search"), t("tab_ai")])
+    tab_search, tab_ai = st.tabs(["🔍 Search & Edit", "🤖 AI Assistant"])
     
     # ----------------------------------------
-    # TAB 1: SEARCH & EDIT (DELETE FEATURE)
+    # TAB 1: SEARCH & EDIT
     # ----------------------------------------
     with tab_search:
-        search_col1, search_col2, search_col3 = st.columns(3)
-        with search_col1: search_title = st.text_input(t("search_title"))
-        with search_col2: search_channel = st.text_input(t("search_channel"))
+        search_col1, search_col2, search_col3, search_col4 = st.columns(4)
+        with search_col1: search_title = st.text_input("🎬 Search Title")
+        with search_col2: search_channel = st.text_input("👤 Search Channel")
         with search_col3: 
-            unique_categories = [t("all")] + list(data_frame['yt_category'].unique())
-            selected_category = st.selectbox(t("filter_category"), unique_categories)
+            unique_yt_categories = ["All"] + sorted(list(data_frame['yt_category'].unique()))
+            selected_yt_category = st.selectbox("📺 YouTube Category Filter", unique_yt_categories)
+        with search_col4: 
+            unique_categories = ["All"] + TARGET_CATEGORIES + [DEFAULT_CATEGORY]
+            selected_category = st.selectbox("📂 AI Category Filter", unique_categories)
 
         filtered_data = data_frame.copy()
         if search_title: filtered_data = filtered_data[filtered_data['title'].str.contains(search_title, case=False, na=False)]
         if search_channel: filtered_data = filtered_data[filtered_data['channel'].str.contains(search_channel, case=False, na=False)]
-        if selected_category != t("all"): filtered_data = filtered_data[filtered_data['yt_category'] == selected_category]
+        if selected_yt_category != "All": filtered_data = filtered_data[filtered_data['yt_category'] == selected_yt_category]
+        if selected_category != "All": filtered_data = filtered_data[filtered_data['custom_category'] == selected_category]
 
         display_data = filtered_data.copy()
         display_data['video_link'] = "https://youtube.com/watch?v=" + display_data['video_id']
         
-        # Setup columns for Data Editor
         cols = display_data.columns.tolist()
         if 'custom_category' in cols: cols.insert(0, cols.pop(cols.index('custom_category')))
         if 'thumbnail' in cols: cols.insert(0, cols.pop(cols.index('thumbnail')))
         display_data = display_data[cols]
         
-        # Add a Checkbox column if in OAuth mode
-        show_delete_options = (auth_mode == t("mode_oauth"))
+        show_delete_options = (auth_mode == "👤 Google Account (Full Access)")
         if show_delete_options:
-            display_data.insert(0, 'selected', False)
+            display_data.insert(0, 'Select', False)
 
         display_data = display_data.rename(columns={
-            "selected": t("col_select"),
-            "thumbnail": t("col_thumb"),
-            "custom_category": t("col_custom_cat"),
-            "title": t("col_title"),
-            "channel": t("col_channel"),
-            "yt_category": t("col_yt_cat"),
-            "video_link": t("col_link")
+            "thumbnail": "Thumb",
+            "custom_category": "AI Category",
+            "yt_category": "YouTube Category",
+            "title": "Video Title",
+            "channel": "Channel",
+            "video_link": "Watch"
         })
 
         with st.container(border=True):
             if show_delete_options:
-                # Interactive Data Editor for Deletion
                 edited_df = st.data_editor(
                     display_data, 
                     column_config={
-                        t("col_select"): st.column_config.CheckboxColumn(t("col_select"), default=False),
-                        t("col_link"): st.column_config.LinkColumn("▶️"),
-                        t("col_thumb"): st.column_config.ImageColumn(""),
-                        "playlist_item_id": None, # Hide secret ID from users
+                        "Select": st.column_config.CheckboxColumn("Select", default=False),
+                        "Watch": st.column_config.LinkColumn("▶️"),
+                        "Thumb": st.column_config.ImageColumn(""),
+                        "playlist_item_id": None, 
                         "video_id": None
                     },
                     width='stretch', hide_index=True, height=500
                 )
                 
-                # Delete Button Logic
-                videos_to_delete = edited_df[edited_df[t("col_select")] == True]
+                videos_to_delete = edited_df[edited_df["Select"] == True]
                 if not videos_to_delete.empty:
-                    if st.button(t("btn_delete_selected"), type="primary"):
+                    if st.button("🗑️ Remove Selected Videos", type="primary"):
                         try:
                             for pl_item_id in videos_to_delete['playlist_item_id']:
                                 delete_video_from_playlist(yt_client, pl_item_id)
-                                time.sleep(0.5) # Prevent hitting immediate rate limits
-                            st.success(t("msg_delete_success", count=len(videos_to_delete)))
-                            st.balloons()
+                                time.sleep(0.5) 
+                            st.success(f"Successfully removed {len(videos_to_delete)} videos! Fetching updated list...")
+                            del st.session_state['df']
+                            time.sleep(1)
+                            st.rerun()
                         except Exception as e:
-                            st.error(f"Silme hatası / Deletion error: {e}")
+                            st.error(f"Deletion error: {e}")
             else:
-                # Standard Dataframe for Read-Only mode
                 st.dataframe(
                     display_data, 
                     column_config={
-                        t("col_link"): st.column_config.LinkColumn("▶️"),
-                        t("col_thumb"): st.column_config.ImageColumn(""),
+                        "Watch": st.column_config.LinkColumn("▶️"),
+                        "Thumb": st.column_config.ImageColumn(""),
                         "playlist_item_id": None,
                         "video_id": None
                     },
@@ -452,29 +421,29 @@ if 'df' in st.session_state:
                 )
         
     # ----------------------------------------
-    # TAB 2: AI ASSISTANT
+    # TAB 2: AI ASSISTANT (SMART TAGGING)
     # ----------------------------------------
     with tab_ai:
         with st.container(border=True):
-            st.info(t("ai_info"), icon="🤖")
-            if st.button(t("btn_ai_scan"), type="primary"):
-                if not input_gemini_api:
-                    st.error(t("msg_missing_gemini"))
-                else:
-                    temp_data = st.session_state['df'].copy() 
-                    matched_results = batch_gemini_categorize(temp_data, input_gemini_api)
-                    
-                    def map_ai_category(vid_id):
-                        category = matched_results.get(vid_id, "General / Unrelated")
-                        if category == "Personal Development": return t("cat_personal")
-                        if category == "Vocal Training": return t("cat_vocal")
-                        if category == "Software Developer": return t("cat_software")
-                        if category == "Politics": return t("cat_politics")
-                        return t("cat_general")
-
-                    st.session_state['df']['custom_category'] = st.session_state['df']['video_id'].apply(map_ai_category)
-                    st.success(t("msg_ai_success"))
-                    st.rerun()
+            st.info("To avoid API limits, this tool only scans videos that haven't been tagged yet.", icon="🤖")
+            
+            uncategorized_df = data_frame[data_frame['custom_category'] == DEFAULT_CATEGORY]
+            st.write(f"**Remaining Videos to Tag:** {len(uncategorized_df)}")
+            
+            if len(uncategorized_df) == 0:
+                st.success("All videos are already categorized! 🎉")
+            else:
+                if st.button("Start AI Analysis", type="primary"):
+                    if not input_gemini_api:
+                        st.error("Gemini API Key is missing in the sidebar.")
+                    else:
+                        matched_results = batch_gemini_categorize(uncategorized_df, input_gemini_api)
+                        
+                        for vid_id, category in matched_results.items():
+                            st.session_state['df'].loc[st.session_state['df']['video_id'] == vid_id, 'custom_category'] = category
+                            
+                        st.success("✨ AI classification completed successfully!")
+                        st.rerun()
 
 else:
-    st.info(f"### {t('welcome_title')}\n\n{t('welcome_text')}")
+    st.info("### Welcome! 👋\n\nPlease configure your Settings and Authentication on the sidebar, then click **Fetch Data** to load your playlist.")

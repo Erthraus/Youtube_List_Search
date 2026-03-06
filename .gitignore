@@ -7,7 +7,15 @@ env/
 settings.json
 client_secret.json
 token.json
+test_client_secret.json
+test_cs.json
+test_flow.py
 
 # Python Cache
 __pycache__/
 *.pyc
+
+# AI agent context and progression files
+agents.md
+progression.md
+.oauth_state.json
