@@ -4,11 +4,11 @@ venv/
 env/
 
 # Settings and Secrets
-settings.json
-client_secret.json
-token.json
-test_client_secret.json
-test_cs.json
+json_files/settings.json
+json_files/client_secret.json
+json_files/token.json
+json_files/test_client_secret.json
+json_files/test_cs.json
 test_flow.py
 
 # Python Cache
@@ -16,6 +16,7 @@ __pycache__/
 *.pyc
 
 # AI agent context and progression files
-agents.md
-progression.md
-.oauth_state.json
+md_files/agents.md
+md_files/progression.md
+json_files/.oauth_state.json
+md_files
