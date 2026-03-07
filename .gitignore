@@ -19,4 +19,4 @@ __pycache__/
 md_files/agents.md
 md_files/progression.md
 json_files/.oauth_state.json
-md_files
+md_files.oauth_sessions.json
