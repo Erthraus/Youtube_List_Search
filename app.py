@@ -56,7 +56,6 @@ st.markdown("""
 # ==========================================
 # 2. CONSTANTS & AI CATEGORIES
 # ==========================================
-CLIENT_SECRETS_FILE = "json_files/client_secret.json"
 SCOPES = ['https://www.googleapis.com/auth/youtube']
 
 DEFAULT_CATEGORY = "General / Unrelated"
@@ -388,6 +387,29 @@ else:
             st.write("")
             
             try:
+                # --------------------------------------------------------------------------------
+                # SECRET CONFIGURATION CHECK
+                # --------------------------------------------------------------------------------
+                if "gcp_oauth" not in st.secrets:
+                    st.error("Missing Google OAuth credentials in Streamlit Secrets.")
+                    st.markdown("""
+                    **How to fix this:**
+                    1. Create a file called `.streamlit/secrets.toml` in your project root.
+                    2. Add your Google OAuth Web credentials like this:
+                    ```toml
+                    [gcp_oauth.web]
+                    client_id = "YOUR_CLIENT_ID"
+                    project_id = "YOUR_PROJECT_ID"
+                    auth_uri = "https://accounts.google.com/o/oauth2/auth"
+                    token_uri = "https://oauth2.googleapis.com/token"
+                    auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+                    client_secret = "YOUR_CLIENT_SECRET"
+                    redirect_uris = ["http://localhost:8501/", "https://your-production-app.com/"]
+                    ```
+                    *(Note: Ensure you leave `[gcp_oauth.web]` exactly as-is so the dictionary parses correctly).*
+                    """)
+                    st.stop()
+                    
                 ALLOWED_REDIRECTS = ["http://localhost:8501/", "https://your-production-app.com/"]
                 redirect_uri = st.selectbox("Redirect URI Proxy", ALLOWED_REDIRECTS)
                 state_file = "json_files/.oauth_state.json"
@@ -400,7 +422,8 @@ else:
                     oauth_states = {}
 
                 if "auth_url" not in st.session_state or st.session_state.get("redirect_uri") != redirect_uri:
-                    flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES, redirect_uri=redirect_uri)
+                    # Switch from file to config dictionary via st.secrets
+                    flow = Flow.from_client_config(dict(st.secrets["gcp_oauth"]), scopes=SCOPES, redirect_uri=redirect_uri)
                     auth_url, state = flow.authorization_url(prompt='consent')
                     
                     current_time = time.time()
@@ -432,7 +455,7 @@ else:
                     auth_code = query_params["code"]
                     auth_state = query_params["state"]
                     if auth_code != st.session_state.get("processed_auth_code"):
-                        flow = Flow.from_client_secrets_file(CLIENT_SECRETS_FILE, scopes=SCOPES, redirect_uri=redirect_uri)
+                        flow = Flow.from_client_config(dict(st.secrets["gcp_oauth"]), scopes=SCOPES, redirect_uri=redirect_uri)
                         if auth_state in oauth_states:
                             state_data = oauth_states[auth_state]
                             flow.code_verifier = state_data.get("verifier") if isinstance(state_data, dict) else state_data
@@ -470,4 +493,4 @@ else:
                         st.success("Uplink Established! Standardizing interface...")
                         st.rerun()
             except Exception as e:
-                st.error(f"Missing core client_secret.json architecture. {e}")
+                st.error(f"Authentication Error: {e}")
