@@ -1,7 +1,0 @@
-streamlit
-pandas
-google-api-python-client
-google-genai
-google-auth-oauthlib
-google-auth-httplib2
-extra-streamlit-components
