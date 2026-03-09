@@ -3,7 +3,8 @@ import { YouTubeVideo } from "./youtube";
 
 export async function categorizeVideosWithAI(
   videos: YouTubeVideo[], 
-  targetCategories: string[]
+  targetCategories: string[],
+  userApiKey: string
 ): Promise<{ tags: Record<string, string>, debugText: string, error?: string }> {
   if (videos.length === 0) return { tags: {}, debugText: "No videos provided" };
   
@@ -12,12 +13,11 @@ export async function categorizeVideosWithAI(
   const results: Record<string, string> = {};
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === 'your_gemini_api_key') {
-      throw new Error("GEMINI_API_KEY is missing or invalid in .env.local. Did you forget to restart the Next.js server?");
+    if (!userApiKey) {
+      throw new Error("User Gemini API Key is missing.");
     }
   
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey: userApiKey });
     const model = "gemini-2.5-flash";
     // Increased chunk size from 50 to 300 to drastically reduce the number of API calls 
     // and easily stay under the 20 requests per day / 15 requests per minute Free Tier quota.

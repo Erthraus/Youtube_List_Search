@@ -14,8 +14,8 @@ export default function Dashboard() {
   const [aiFilter, setAiFilter] = useState('All');
   const [ytFilter, setYtFilter] = useState('All');
 
-  // Input custom target categories exactly like the python version
-  const [targetCategoriesInput, setTargetCategoriesInput] = useState('Personal Development, Vocal Training, Software Developer, Politics, Gameplay');
+  const [userGeminiKey, setUserGeminiKey] = useState('');
+  const [targetCategoriesInput, setTargetCategoriesInput] = useState('');
   const [forceAllAnalysis, setForceAllAnalysis] = useState(false);
 
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
@@ -23,6 +23,9 @@ export default function Dashboard() {
   useEffect(() => {
     const saved = localStorage.getItem('yt_playlist_id');
     if (saved) setPlaylistId(saved);
+
+    const savedKey = localStorage.getItem('user_gemini_key');
+    if (savedKey) setUserGeminiKey(savedKey);
     
     // Try to load cached videos
     const cachedVideos = localStorage.getItem('yt_videos_cache');
@@ -55,13 +58,18 @@ export default function Dashboard() {
 
     const runAiAnalysis = async () => {
     if (videos.length === 0) return;
+    if (!userGeminiKey) {
+      alert("Please enter your Gemini API Key.");
+      return;
+    }
+    
     setAnalyzing(true);
     try {
       const targetCategories = targetCategoriesInput.split(',').map(c => c.trim()).filter(Boolean);
       const res = await fetch('/api/videos/categorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videos, playlistId, targetCategories, forceAll: forceAllAnalysis })
+        body: JSON.stringify({ videos, playlistId, targetCategories, forceAll: forceAllAnalysis, userApiKey: userGeminiKey })
       });
       const data = await res.json();
       
@@ -205,10 +213,26 @@ export default function Dashboard() {
                </button>
             </div>
             <div className="flex flex-col gap-2">
+              <label className="text-xs text-[#888]">Your Gemini API Key (Stored Locally)</label>
+              <input 
+                type="password"
+                placeholder="AIzaSy..." 
+                value={userGeminiKey}
+                onChange={e => {
+                  setUserGeminiKey(e.target.value);
+                  localStorage.setItem('user_gemini_key', e.target.value);
+                }}
+                className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#00ff41] transition-colors"
+                autoComplete="new-password"
+              />
+            </div>
+            
+            <div className="flex flex-col gap-2">
               <label className="text-xs text-[#888]">Target AI Categories (comma separated)</label>
               <textarea 
                 value={targetCategoriesInput}
                 onChange={e => setTargetCategoriesInput(e.target.value)}
+                placeholder="e.g. Technology, Politics, Music, Gaming"
                 className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#00ff41] transition-colors min-h-[60px]"
               />
             </div>

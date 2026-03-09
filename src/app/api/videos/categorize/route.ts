@@ -13,10 +13,10 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { videos, playlistId, targetCategories, forceAll } = await request.json();
+    const { videos, playlistId, targetCategories, forceAll, userApiKey } = await request.json();
     
-    if (!videos || !playlistId || !targetCategories) {
-      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    if (!videos || !playlistId || !targetCategories || !userApiKey) {
+      return NextResponse.json({ error: 'Missing parameters. Please ensure your Gemini API Key is entered.' }, { status: 400 });
     }
 
     let unmapped: YouTubeVideo[] = videos;
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     }
 
     // Call Gemini AI
-    const { tags: newTags, debugText, error: geminiError } = await categorizeVideosWithAI(unmapped, targetCategories);
+    const { tags: newTags, debugText, error: geminiError } = await categorizeVideosWithAI(unmapped, targetCategories, userApiKey);
 
     // Save back to Google Sheet
     const sheetId = await createSheetIfNotExists(session.accessToken, `YT_List_Search_Tags_${playlistId}`);
