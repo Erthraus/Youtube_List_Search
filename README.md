@@ -1,34 +1,32 @@
-# YT Playlist Manager
+# YouTube List Search
 
-A full-stack Next.js application designed to manage, categorize, and filter massive YouTube playlists, augmented with Gemini AI intelligence.
+A modern, high-performance Next.js web application designed to help users intelligently filter, manage, and categorize their massive YouTube playlists using Google's Gemini AI.
 
 ## Features
-- **Intelligent Classification**: Leverages Google's Gemini Flash AI to categorize disorganized "Watch Later" lists into customized target subjects.
-- **Cloud State Synchronization**: Automatically saves your AI-generated tags to a hidden Google Spreadsheet, guaranteeing that your categorizations stay synced whether running locally or on a deployed server.
-- **Dashboard Interface**: Search, filter, and remove embedded videos efficiently without bouncing back to the default YouTube app.
 
-## Quickstart (Local Development)
+- **AI-Powered Categorization:** Integrates with Gemini 2.5 Flash to automatically classify YouTube videos into custom, user-defined topics at lightning speed.
+- **SaaS First & Multi-Tenant:** Users provide their own Gemini API keys directly in the UI, ensuring infinite scalability without hitting a central server rate limit. 
+- **Google Sheets Cloud Sync:** Acts as a serverless database by auto-generating and syncing a hidden Google Spreadsheet in the user's Drive to persist AI mappings across sessions.
+- **Blazing Fast Local Caching:** Video feeds and AI tags are cached in the browser for an instant load time on subsequent visits.
+- **Sleek UI/UX:** A responsive, neon-green dark mode dashboard equipped with real-time text search, column sorting, and instant video removal mechanisms.
+- **Secure Authentication:** Features robust OAuth 2.0 integration via `NextAuth.js`, safely handling tokens without exposing credentials.
 
-**1. Install Dependencies**
-```bash
-npm install
-```
+## Tech Stack
 
-**2. Configure Environment**
-Create or edit `.env.local` to securely embed your Google OAuth Application Keys (Type: Web Application) and Gemini API token.
+- **Core:** Next.js (App Router), React, TypeScript
+- **Styling:** Tailwind CSS, Lucide Icons
+- **Auth:** NextAuth (Google Provider)
+- **Integrations:** YouTube Data API v3, Google Sheets API v4, Google GenAI (Gemini)
+
+## Environment Setup
+
+To run locally simply provide your Google Cloud OAuth credentials in your environment (`.env.local`):
+
 ```env
 NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=generate_any_random_string_here
+NEXTAUTH_SECRET=your_random_secure_string
 
-GOOGLE_CLIENT_ID=your_gcp_client_id
-GOOGLE_CLIENT_SECRET=your_gcp_client_secret
-
-GEMINI_API_KEY=your_gemini_api_key
+GOOGLE_CLIENT_ID=your_oauth_client_id
+GOOGLE_CLIENT_SECRET=your_oauth_client_secret
 ```
-
-**3. Run the application**
-```bash
-npm run dev
-```
-
-Visit [http://localhost:3000](http://localhost:3000). You will be prompted to connect securely over Google OAuth 2.0.
+*(Note: Users will input their own Gemini API Keys directly within the web interface.)*
