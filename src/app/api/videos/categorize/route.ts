@@ -5,6 +5,10 @@ import { categorizeVideosWithAI } from '@/lib/gemini';
 import { createSheetIfNotExists, saveTagsToSheet, loadTagsFromSheet } from '@/lib/sheets';
 import { YouTubeVideo } from '@/lib/youtube';
 
+// Set max execution time to 60 seconds (Vercel Hobby plan maximum) to prevent 504 timeouts
+// during long AI categorization processes.
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   
