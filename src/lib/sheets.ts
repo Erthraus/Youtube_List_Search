@@ -43,7 +43,7 @@ export async function loadTagsFromSheet(accessToken: string, spreadsheetId: stri
   try {
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: "Sheet1!A:C", // A: Video ID, B: Title, C: Category
+      range: "A:C", // A: Video ID, B: Title, C: Category — no sheet name prefix, uses first sheet regardless of language
     });
     
     const rows = res.data.values;
@@ -79,7 +79,7 @@ export async function saveTagsToSheet(accessToken: string, spreadsheetId: string
   
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: "Sheet1!A1",
+    range: "A1", // No sheet name prefix — works regardless of account language (Sheet1, Sayfa1, etc.)
     valueInputOption: "USER_ENTERED",
     requestBody: { values }
   });
