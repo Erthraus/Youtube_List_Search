@@ -1,14 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
-import { categorizeVideosWithAI } from '@/lib/gemini';
 import { createSheetIfNotExists, saveTagsToSheet, loadTagsFromSheet } from '@/lib/sheets';
 import { YouTubeVideo } from '@/lib/youtube';
 
-// Set max execution time to 60 seconds (Vercel Hobby plan maximum) to prevent 504 timeouts
-// during long AI categorization processes.
-export const maxDuration = 60;
-
+// This route now ONLY handles saving AI tags to Google Sheets.
+// The actual Gemini AI call is made client-side in Dashboard.tsx to avoid Vercel timeout limits.
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   
@@ -17,54 +14,36 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { videos, playlistId, targetCategories, forceAll, userApiKey } = await request.json();
+    const { videos, playlistId, newTags } = await request.json();
     
-    if (!videos || !playlistId || !targetCategories || !userApiKey) {
-      return NextResponse.json({ error: 'Missing parameters. Please ensure your Gemini API Key is entered.' }, { status: 400 });
+    if (!videos || !playlistId || !newTags) {
+      return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
     }
-
-    let unmapped: YouTubeVideo[] = videos;
-    if (!forceAll) {
-      unmapped = videos.filter((v: YouTubeVideo) => v.custom_category === 'General / Unrelated');
-    }
-    
-    if (unmapped.length === 0) {
-      return NextResponse.json({ message: 'All videos already categorized.' });
-    }
-
-    // Call Gemini AI
-    const { tags: newTags, debugText, error: geminiError } = await categorizeVideosWithAI(unmapped, targetCategories, userApiKey);
 
     // Save back to Google Sheet
     const sheetId = await createSheetIfNotExists(session.accessToken, `YT_List_Search_Tags_${playlistId}`);
     
-    // We should merge with existing tags before writing to not overwrite the whole sheet with only new ones
-    // Wait, saveTagsToSheet overwrites everything. Let's fetch the existing sheet first.
+    // Merge with existing tags before writing to avoid overwriting the whole sheet
     const existingTags = await loadTagsFromSheet(session.accessToken, sheetId);
 
     // Build complete Map
     const allTagsMap: Record<string, {title: string, category: string}> = {};
-    for (const v of videos) {
+    for (const v of videos as YouTubeVideo[]) {
       const existingInSheet = existingTags[v.video_id];
       const newlyMapped = newTags[v.video_id];
       
       const category = newlyMapped || existingInSheet || v.custom_category;
       
-      if (category !== 'General / Unrelated') {
+      if (category && category !== 'General / Unrelated') {
         allTagsMap[v.video_id] = { title: v.title, category };
       }
     }
 
     await saveTagsToSheet(session.accessToken, sheetId, allTagsMap);
 
-    return NextResponse.json({ 
-      mappedCount: Object.keys(newTags).length, 
-      tags: newTags,
-      debugText,
-      geminiError
-    });
+    return NextResponse.json({ success: true, savedCount: Object.keys(allTagsMap).length });
   } catch (error: any) {
-    console.error("POST Categorize Error:", error);
+    console.error("POST Categorize (Save Tags) Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

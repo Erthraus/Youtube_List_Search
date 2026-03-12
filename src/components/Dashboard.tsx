@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { signOut } from 'next-auth/react';
 import { Search, Loader2, Play, Trash2, Cpu, RefreshCw, LogOut, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { YouTubeVideo } from '@/lib/youtube';
+import { GoogleGenAI } from '@google/genai';
 
 export default function Dashboard() {
   const [playlistId, setPlaylistId] = useState('');
@@ -26,6 +27,9 @@ export default function Dashboard() {
 
     const savedKey = localStorage.getItem('user_gemini_key');
     if (savedKey) setUserGeminiKey(savedKey);
+
+    const savedCategories = localStorage.getItem('target_categories');
+    if (savedCategories) setTargetCategoriesInput(savedCategories);
     
     // Try to load cached videos
     const cachedVideos = localStorage.getItem('yt_videos_cache');
@@ -46,14 +50,42 @@ export default function Dashboard() {
       const res = await fetch(`/api/videos?playlistId=${playlistId}`);
       if (!res.ok) throw new Error('Failed to fetch videos');
       const data = await res.json();
-      const fetchedVideos = data.videos || [];
-      setVideos(fetchedVideos);
-      localStorage.setItem('yt_videos_cache', JSON.stringify(fetchedVideos));
+      const fetchedVideos: YouTubeVideo[] = data.videos || [];
+
+      // Build a map of existing local categories to prevent data loss when sheet is empty/unavailable.
+      // Priority: server category > local cache category > "General / Unrelated"
+      const cachedStr = localStorage.getItem('yt_videos_cache');
+      const localCategoryMap: Record<string, string> = {};
+      if (cachedStr) {
+        try {
+          const cached: YouTubeVideo[] = JSON.parse(cachedStr);
+          cached.forEach(v => {
+            if (v.custom_category && v.custom_category !== 'General / Unrelated') {
+              localCategoryMap[v.video_id] = v.custom_category;
+            }
+          });
+        } catch { /* ignore parse errors */ }
+      }
+
+      // Merge: if server doesn't know a category but local cache does, keep local.
+      const merged = fetchedVideos.map(v => {
+        if (v.custom_category && v.custom_category !== 'General / Unrelated') {
+          return v; // Server has a real category (from sheet) — trust it
+        }
+        if (localCategoryMap[v.video_id]) {
+          return { ...v, custom_category: localCategoryMap[v.video_id] }; // Use local cache
+        }
+        return v; // Genuinely uncategorized
+      });
+
+      setVideos(merged);
+      localStorage.setItem('yt_videos_cache', JSON.stringify(merged));
     } catch (err) {
       alert('Error loading videos');
     } finally {
       setLoading(false);
     }
+
   };
 
     const runAiAnalysis = async () => {
@@ -62,45 +94,120 @@ export default function Dashboard() {
       alert("Please enter your Gemini API Key.");
       return;
     }
-    
+
     setAnalyzing(true);
     try {
       const targetCategories = targetCategoriesInput.split(',').map(c => c.trim()).filter(Boolean);
-      const res = await fetch('/api/videos/categorize', {
+      if (targetCategories.length === 0) {
+        alert("Please enter at least one target category.");
+        return;
+      }
+
+      let unmapped = videos;
+      if (!forceAllAnalysis) {
+        unmapped = videos.filter(v => v.custom_category === 'General / Unrelated');
+      }
+
+      if (unmapped.length === 0) {
+        alert('All videos already categorized. Enable "Force re-categorize ALL" to redo.');
+        return;
+      }
+
+      // --- Client-side Gemini call (no Vercel timeout!) ---
+      const ai = new GoogleGenAI({ apiKey: userGeminiKey });
+      const model = "gemini-2.5-flash";
+      const CHUNK_SIZE = 300;
+      const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+      const chunks: YouTubeVideo[][] = [];
+      for (let i = 0; i < unmapped.length; i += CHUNK_SIZE) {
+        chunks.push(unmapped.slice(i, i + CHUNK_SIZE));
+      }
+
+      const newTags: Record<string, string> = {};
+      const catString = targetCategories.map((c, i) => `${i + 1}. ${c}`).join("\n");
+      let debugText = "";
+      let geminiError = "";
+
+      for (const chunk of chunks) {
+        const videoListStr = chunk.map(v => `ID: ${v.video_id} | Title: ${v.title} | Channel: ${v.channel}`).join("\n");
+
+        const prompt = `
+          Below is a list of YouTube videos. Identify ONLY the videos that fit into these target categories:
+          ${catString}
+
+          If a video does not fit, completely IGNORE it.
+          Respond ONLY in valid JSON array format mapping the parsed items.
+          Example: [{"id": "video_id", "category": "CategoryName"}]
+
+          Video List:
+          ${videoListStr}
+        `;
+
+        try {
+          const response = await ai.models.generateContent({ model, contents: prompt });
+          let rawText = response.text || "[]";
+          debugText += `\nRaw AI Response chunk:\n${rawText}\n`;
+
+          rawText = rawText.trim();
+          if (rawText.startsWith("```json")) rawText = rawText.slice(7, -3);
+          else if (rawText.startsWith("```")) rawText = rawText.slice(3, -3);
+
+          const parsed = JSON.parse(rawText.trim());
+          if (Array.isArray(parsed)) {
+            parsed.forEach((item: any) => {
+              if (item.id && item.category && targetCategories.includes(item.category)) {
+                newTags[item.id] = item.category;
+              }
+            });
+          }
+        } catch (err: any) {
+          geminiError = err.message || "Failed to process chunk";
+          debugText += `\nError inside chunk: ${geminiError}\n`;
+          console.error("Error categorizing chunk:", err);
+        }
+
+        if (chunks.length > 1) await delay(4000);
+      }
+      // --- End Gemini call ---
+
+      const mappedCount = Object.keys(newTags).length;
+
+      if (mappedCount === 0) {
+        if (geminiError?.includes('429') || geminiError?.includes('Quota')) {
+          alert(`AI Quota Exceeded! You have hit the Gemini Free Tier limit. Please try again tomorrow.`);
+        } else {
+          console.error("Gemini Debug:", debugText, geminiError);
+          alert(`0 videos mapped. Check browser console for Gemini debug trace.`);
+        }
+        return;
+      }
+
+      // Update local state immediately
+      setVideos(prev => {
+        const updated = prev.map(v =>
+          newTags[v.video_id] ? { ...v, custom_category: newTags[v.video_id] } : v
+        );
+        localStorage.setItem('yt_videos_cache', JSON.stringify(updated));
+        return updated;
+      });
+
+      // Save to Google Sheet (lightweight API call — no timeout risk)
+      const saveRes = await fetch('/api/videos/categorize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videos, playlistId, targetCategories, forceAll: forceAllAnalysis, userApiKey: userGeminiKey })
+        body: JSON.stringify({ videos, playlistId, newTags })
       });
-      const data = await res.json();
-      
-      if (data.tags) {
-        // Update local state with new tags
-        setVideos(prev => {
-          const updated = prev.map(v => {
-            if (data.tags[v.video_id]) {
-              return { ...v, custom_category: data.tags[v.video_id] };
-            }
-            return v;
-          });
-          localStorage.setItem('yt_videos_cache', JSON.stringify(updated));
-          return updated;
-        });
-        
-        if (data.mappedCount === 0) {
-          if (data.geminiError?.includes('429') || data.geminiError?.includes('Quota')) {
-            alert(`AI Quota Exceeded! You have hit the Gemini Free Tier limit. Please try again tomorrow.`);
-          } else {
-            console.error("Gemini Debug:", data.debugText, data.geminiError);
-            alert(`0 videos mapped. Check browser console for Gemini debug trace.`);
-          }
-        } else {
-          alert(`Successfully mapped ${data.mappedCount} videos.`);
-        }
-      } else if (data.message) {
-        alert(data.message);
+      const saveData = await saveRes.json();
+
+      if (!saveRes.ok) {
+        alert(`AI categorized ${mappedCount} videos, but failed to save to Google Sheet: ${saveData.error}`);
+      } else {
+        alert(`Successfully categorized ${mappedCount} videos and saved to Google Sheet!`);
       }
     } catch (err) {
-      alert('Failed to run AI analysis');
+      alert('Failed to run AI analysis. Check the console for details.');
+      console.error("runAiAnalysis error:", err);
     } finally {
       setAnalyzing(false);
     }
@@ -133,7 +240,11 @@ export default function Dashboard() {
 
   // derived state
   const targetCategories = targetCategoriesInput.split(',').map(c => c.trim()).filter(Boolean);
-  const aiOptions = ['All', 'General / Unrelated', ...targetCategories];
+  // AI filter options: combine categories from textarea AND actual video data
+  // so filters work even when the textarea is empty (e.g. on a fresh page load with cached data)
+  const categoriesFromVideos = Array.from(new Set(videos.map(v => v.custom_category).filter(c => c && c !== 'General / Unrelated')));
+  const allAiCategories = Array.from(new Set([...targetCategories, ...categoriesFromVideos])).sort();
+  const aiOptions = ['All', 'General / Unrelated', ...allAiCategories];
   
   const ytOptions = ['All', ...Array.from(new Set(videos.map(v => v.yt_category)))].sort();
 
@@ -231,7 +342,10 @@ export default function Dashboard() {
               <label className="text-xs text-[#888]">Target AI Categories (comma separated)</label>
               <textarea 
                 value={targetCategoriesInput}
-                onChange={e => setTargetCategoriesInput(e.target.value)}
+                onChange={e => {
+                  setTargetCategoriesInput(e.target.value);
+                  localStorage.setItem('target_categories', e.target.value);
+                }}
                 placeholder="e.g. Technology, Politics, Music, Gaming"
                 className="w-full bg-[#1a1a1a] border border-[#333] rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-[#00ff41] transition-colors min-h-[60px]"
               />

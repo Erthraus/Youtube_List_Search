@@ -68,26 +68,22 @@ export async function saveTagsToSheet(accessToken: string, spreadsheetId: string
   if (!spreadsheetId) return;
   
   const sheets = getSheetsClient(accessToken);
-  try {
-    // We rewrite the entire sheet for simplicity as the application loads everything into memory anyway
-    // Setup Header
-    const values = [["Video ID", "Title", "AI Category"]];
-    for (const [id, data] of Object.entries(updates)) {
-      if (data.category !== "General / Unrelated") {
-        values.push([id, data.title, data.category]);
-      }
+  // We rewrite the entire sheet for simplicity as the application loads everything into memory anyway
+  // Setup Header
+  const values = [["Video ID", "Title", "AI Category"]];
+  for (const [id, data] of Object.entries(updates)) {
+    if (data.category !== "General / Unrelated") {
+      values.push([id, data.title, data.category]);
     }
-    
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: "Sheet1!A1",
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values }
-    });
-    
-    // Also clear whatever rest of the rows if it got smaller
-    // In a real database this isn't needed, but for sheets it's recommended to do a clear and update, or just overwrite padding
-  } catch (err) {
-    console.error("Error saving tags to sheet:", err);
   }
+  
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: "Sheet1!A1",
+    valueInputOption: "USER_ENTERED",
+    requestBody: { values }
+  });
+  
+  // Also clear whatever rest of the rows if it got smaller
+  // In a real database this isn't needed, but for sheets it's recommended to do a clear and update, or just overwrite padding
 }
